@@ -239,8 +239,8 @@ C             Extrapolate ray to domain top if above
           CALL COMPUTE_TOP_RADIANCES (SRCTYPE, SKYRAD,WAVENO,WAVELEN,
      .                              UNITS, NTOPPTS, NSTOKES, BCRAD(1,1),
      .                              NPHI0MAX, NMU, 1, 1,
-     .                              MU2, PHI2, MU, PHI, NPHI0,
-     .                              1)
+     .                              REAL(MU2), REAL(PHI2), MU, PHI, 
+     .                              NPHI0,1)
         ELSE
           DO ITOP=1,NTOPPTS
             BCRAD(:,ITOP) = 0.0
@@ -311,7 +311,10 @@ C      PRINT *, 'TIME_SOURCE', TIME_SOURCE
      .           PHASEINTERPWT, ALBEDOP, EXTINCTP, OPTINTERPWT,
      .           INTERPPTR, EXTMIN, SCATMIN, DOEXACT, TEMP, PHASEMAX,
      .           DTEMP, DEXTM, DALBM, DFJ, MAXSUBGRIDINTS,
-     .           TRANSCUT, LONGEST_PATH_PTS,DERIV_MAXNMICRO)
+     .           TRANSCUT, LONGEST_PATH_PTS,DERIV_MAXNMICRO, 
+     .            NSFCDER,NSFCPTS,SFCDER,DELXSFC,
+     .             DELYSFC, SFCGRAD_RAY, SFCSRCGRAD_RAY, NANG,
+     .             SFCGRIDRAD)
 C    Calculates the cost function and its gradient using the Levis approximation
 C    to the Frechet derivatives of the radiative transfer equation.
 C    Calculates the Stokes Vector at the given directions (CAMMU, CAMPHI)
@@ -454,7 +457,12 @@ Cf2py intent(in) :: SINGLESCATTER
 Cf2py intent(out) :: IERR, ERRMSG
       INTEGER MAXSUBGRIDINTS, LONGEST_PATH_PTS
 Cf2py intent(in) :: MAXSUBGRIDINTS, LONGEST_PATH_PTS
-
+      INTEGER NSFCDER, NSFCPTS, NXSFC, NYSFC, NANG
+      INTEGER SFCDER(NSFCDER, NSFCPTS)
+      DOUBLE PRECISION SFCGRAD_RAY(NSTOKES,NSFCDER, NSFCPTS)
+      DOUBLE PRECISION SFCSRCGRAD_RAY(NSTOKES,NANG/2, NSFCPTS)
+      REAL SFCGRIDRAD(NANG/2,*)
+      REAL DELXSFC, DELYSFC     
 
       DOUBLE PRECISION WEIGHT
       DOUBLE PRECISION RAYGRAD(NSTOKES,MAXPG,NUMDER), VISRAD(NSTOKES)
@@ -586,7 +594,9 @@ C         while traversing the SHDOM grid.
      .             TIME_SOURCE,DERIV_MAXNMICRO,
      .             TIME_DIRECT_POINT, TIME_DIRECT_SURFACE,
      .             TIME_RADIANCE, TIME_SUBGRID, TIME_ALLOCATE,
-     .             VERBOSE)
+     .             VERBOSE, NSFCDER,NSFCPTS,SFCDER,DELXSFC,
+     .             DELYSFC, SFCGRAD_RAY, SFCSRCGRAD_RAY, NANG,
+     .             SFCGRIDRAD)
           IF (IERR .NE. 0) RETURN
 
   900     CONTINUE
@@ -636,8 +646,8 @@ C      PRINT *, 'TIME_ALLOCATE', TIME_ALLOCATE
      .             MAXNBC, NTOPPTS, NBOTPTS, BCPTR, BCRAD,
      .             SFCTYPE, NSFCPAR, SFCGRIDPARMS, MU2, PHI2,
      .             X0, Y0, Z0, XE, YE, ZE, SIDE, TRANSMIT,
-     .		       RADOUT, VALIDRAD, TOTAL_EXT, NPART, RAYGRAD,
-     .		       RSHPTR, RADIANCE, LOFJ, PARTDER, NUMDER, DEXT,
+     .		         RADOUT, VALIDRAD, TOTAL_EXT, NPART, RAYGRAD,
+     .		         RSHPTR, RADIANCE, LOFJ, PARTDER, NUMDER, DEXT,
      .             DALB, DLEG, MAXPG, DNUMPHASE, SOLARFLUX,
      .             NPX, NPY, NPZ, DELX, DELY, XSTART, YSTART, ZLEVELS,
      .             EXTDIRP, UNIFORMZLEV, DPHASETAB, DPATH, DPTR,
@@ -651,7 +661,9 @@ C      PRINT *, 'TIME_ALLOCATE', TIME_ALLOCATE
      .             TIME_SOURCE, DERIV_MAXNMICRO,
      .             TIME_DIRECT_POINT, TIME_DIRECT_SURFACE,
      .             TIME_RADIANCE, TIME_SUBGRID, TIME_ALLOCATE,
-     .          VERBOSE)
+     .          VERBOSE, NSFCDER,NSFCPTS,SFCDER,DELXSFC,
+     .             DELYSFC, SFCGRAD_RAY, SFCSRCGRAD_RAY, NANG,
+     .             SFCGRIDRAD)
 C       Integrates the source function through the extinction field
 C     (EXTINCT) backward from the outgoing direction (MU2,PHI2) to find the
 C     radiance (RADOUT) at the point X0,Y0,Z0.
@@ -664,7 +676,7 @@ C     the partial derivatives DEXT, DALB, DIPHASE, DLEG, DPHASETAB.
 
       IMPLICIT NONE
       LOGICAL EXACT_SINGLE_SCATTER, VERBOSE
-      INTEGER NPX, NPY, NPZ, MAXPG, BCELL
+      INTEGER NPX, NPY, NPZ, MAXPG, BCELL, NANG
       REAL    DELX, DELY, XSTART, YSTART, SOLARFLUX
       REAL    ZLEVELS(*)
       REAL    EXTDIRP(*)
@@ -751,6 +763,13 @@ C     the partial derivatives DEXT, DALB, DIPHASE, DLEG, DPHASETAB.
       REAL :: GNDALBEDO
       INTEGER IERR
       CHARACTER ERRMSG*600
+
+      INTEGER NSFCDER, NSFCPTS, NXSFC, NYSFC
+      INTEGER SFCDER(NSFCDER, NSFCPTS)
+      DOUBLE PRECISION SFCGRAD_RAY(NSTOKES,NSFCDER, NSFCPTS)
+      DOUBLE PRECISION SFCSRCGRAD_RAY(NSTOKES,NANG/2, NSFCPTS)
+      REAL SFCGRIDRAD(NANG/2,*)
+      REAL DELXSFC, DELYSFC      
 
       REAL TIME_SOURCE(3), TIME_DIRECT_POINT, TIME_DIRECT_SURFACE
       REAL TIME_RADIANCE, TIME_SUBGRID, TIME_ALLOCATE
@@ -1274,8 +1293,12 @@ C          CALL CPU_TIME(TIME1)
      .                      NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO,
      .                      SRCTYPE, WAVELEN, SOLARMU,SOLARAZ, DIRFLUX,
      .                      SFCTYPE, NSFCPAR, SFCGRIDPARMS,
-     .                      RADBND, BOUNDPTS, BOUNDINTERP, DIRRAD,
-     .                      GNDALBEDO)
+     .                      RADBND, SFCGRIDRAD, NANG,
+     .                      UNITS, WAVENO, BOUNDPTS, BOUNDINTERP, 
+     .                      DIRRAD,
+     .                      GNDALBEDO,SFCGRAD_RAY,NSFCDER,SFCDER,
+     .                      TRANSMIT, SFCSRCGRAD_RAY,
+     .                      DELXSFC,DELYSFC,DTEMP,TEMP)
           RADOUT(:) = RADOUT(:) + TRANSMIT*RADBND(:)
 C         These values aren't actually used. set to -1.0 for
 C         debugging purposes.
@@ -1739,6 +1762,112 @@ C         here. This doesn't save computation time at all though.
       RETURN
       END
 
+      SUBROUTINE COMPUTE_TOP_RADIANCES_GRAD (SRCTYPE, SKYRAD,WAVENO,
+     .                                  WAVELEN,
+     .                                  UNITS, NTOPPTS, NSTOKES, BCRAD,
+     .                                  NPHI0MAX, NMU, IMU, IPHI,
+     .                                  MU, PHI, MUS, PHIS, NPHI0,
+     .                                  INTERPOLATE_FLAG,RADGRAD)
+C       Returns the beginning of the BCRAD array with the downwelling
+C     radiance for the NTOPPTS top boundary points.  Currently all
+C     points have the same unpolarized isotropic radiance.
+      IMPLICIT NONE
+      INTEGER NTOPPTS, NSTOKES
+Cf2py intent(in) :: NTOPPTS, NSTOKES
+      INTEGER NMU, IMU, NPHI0MAX, IPHI
+Cf2py intent(in) :: NMI, IMU, NPHI0MAX, IPHI
+      REAL MU, PHI, MUS(NMU), PHIS(NMU, NPHI0MAX)
+Cf2py intent(in) :: MU, PHI, MUS, PHIS
+      INTEGER NPHI0(NMU)
+Cf2py intent(in) :: NPHI0
+      INTEGER INTERPOLATE_FLAG
+Cf2py intent(in) :: INTERPOLATE_FLAG
+      REAL    SKYRAD(NSTOKES,NMU/2,NPHI0MAX), WAVENO(2), WAVELEN
+Cf2py intent(in) :: SKYRAD, WAVENO, WAVELEN
+      REAL    BCRAD(NSTOKES, *)
+Cf2py intent(in, out) :: BCRAD
+      CHARACTER  SRCTYPE*1, UNITS*1
+Cf2py intent(in) :: SRCTYPE, UNITS
+      REAL    RADGRAD(NSTOKES,*)
+Cf2py intent(out) :: RADGRAD
+
+      INTEGER IBC, K
+      REAL    SKYRAD2(NSTOKES), SKYRAD3(NSTOKES)
+
+      INTEGER I,J, IANG
+      DOUBLE PRECISION POWER, DISTANCE, WEIGHTEDSUM(NSTOKES)
+      DOUBLE PRECISION WEIGHTSUM, WEIGHT
+
+C           At top, boundary radiance either directly evaluated
+C       at discrete ordinate points or interpolated to a specific
+C       MU, PHI. The latter is only done when evaluating a radiance
+C       (not during the solution iterations) and only affects
+C       upward looking (ground based) instruments.
+
+      IF (INTERPOLATE_FLAG .EQ. 1) THEN
+C     Inverse distance weighting interpolation (Cubic).
+C     Distance is based on the scattering angle between the two angles.
+        POWER = 3.0D0
+        WEIGHTEDSUM = 0.0D0
+        WEIGHTSUM = 0.0D0
+        DO I = 1, NMU/2
+          DO J=1, NPHI0(I)
+            DISTANCE = ACOS(MU*MUS(I) +
+     .          SQRT((1.0-MU**2)*(1.0-MUS(I)**2))*
+     .          COS(PHI-PHIS(I,J)))
+            IF (ABS(DISTANCE) .LT. 1E-6) THEN
+              WEIGHT = 1.0D8
+            ELSE
+              WEIGHT = 1.0D0/(DISTANCE**POWER)
+            ENDIF
+            WEIGHTEDSUM(:) = WEIGHTEDSUM(:) + SKYRAD(:,I,J)*WEIGHT
+            WEIGHTSUM = WEIGHTSUM + WEIGHT
+          ENDDO
+        ENDDO
+        SKYRAD3 = WEIGHTEDSUM/WEIGHTSUM
+      ELSE IF (INTERPOLATE_FLAG .EQ. 2) THEN
+C       For surface.
+        IANG = 1
+        POWER = 3.0D0
+        WEIGHTEDSUM = 0.0D0
+        WEIGHTSUM = 0.0D0
+        DO I = NMU/2 + 1, NMU
+          DO J=1, NPHI0(I)
+            DISTANCE = ACOS(MU*MUS(I) +
+     .          SQRT((1.0-MU**2)*(1.0-MUS(I)**2))*
+     .          COS(PHI-PHIS(I,J)))
+            IF (ABS(DISTANCE) .LT. 1E-6) THEN
+              WEIGHT = 1.0D8
+            ELSE
+              WEIGHT = 1.0D0/(DISTANCE**POWER)
+            ENDIF
+            WEIGHTEDSUM(:) = WEIGHTEDSUM(:) + 
+     .              SKYRAD(:,I - NMU/2,J)*WEIGHT
+            WEIGHTSUM = WEIGHTSUM + WEIGHT
+            RADGRAD(1,IANG) = WEIGHT
+            IANG = IANG + 1
+          ENDDO
+        ENDDO
+        SKYRAD3 = WEIGHTEDSUM/WEIGHTSUM
+        RADGRAD(:,:IANG) = RADGRAD(:,:IANG)/WEIGHTSUM
+      ELSE
+        SKYRAD3 = SKYRAD(:,IMU,IPHI)
+      ENDIF
+      IF (SRCTYPE .EQ. 'T') THEN
+        SKYRAD2(1:) = 0.0
+          CALL PLANCK_FUNCTION (SKYRAD3(1), UNITS,
+     .                        WAVENO, WAVELEN, SKYRAD2(1))
+      ELSE
+        SKYRAD2 = SKYRAD3
+      ENDIF
+
+C         Loop over all points assigning the uniform radiance
+      DO IBC = 1, NTOPPTS
+        BCRAD(:,IBC) = SKYRAD2(:)
+      ENDDO
+      RETURN
+      END
+      
 
       SUBROUTINE FIND_BOUNDARY_RADIANCE_GRAD (NSTOKES, XB, YB, MU2,
      .                      PHI2,
@@ -1747,8 +1876,11 @@ C         here. This doesn't save computation time at all though.
      .                      NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO,
      .                      SRCTYPE, WAVELEN, SOLARMU,SOLARAZ, DIRFLUX,
      .                      SFCTYPE, NSFCPAR, SFCGRIDPARMS,
-     .                      RADBND, BOUNDPTS, BOUNDINTERP,DIRRAD,
-     .                      GNDALBEDO)
+     .                      RADBND, SFCGRIDRAD, NANG,
+     .                      UNITS, WAVENO, BOUNDPTS, BOUNDINTERP,DIRRAD,
+     .                      GNDALBEDO,SFCGRAD_RAY,NSFCDER,SFCDER,
+     .                      TRANSMIT, SFCSRCGRAD_RAY,
+     .                      DELXSFC,DELYSFC, DTEMP, TEMP)
 C       Returns the interpolated Stokes radiance at the boundary (RADBND).
 C     Inputs are the boundary location (XB,YB), ray direction away from
 C     boundary (MU2,PHI2), cell number (ICELL) and face (KFACE) at
@@ -1756,23 +1888,36 @@ C     the boundary point.
       IMPLICIT NONE
       INTEGER NSTOKES, ICELL, KFACE, MAXNBC, NTOPPTS, NBOTPTS
       INTEGER GRIDPTR(8,*), BCPTR(MAXNBC,2)
-      INTEGER NMU, NPHI0MAX, NPHI0(*), NSFCPAR
+      INTEGER NMU, NPHI0MAX, NPHI0(*), NSFCPAR, NANG
       REAL    MU2, PHI2
-      INTEGER BOUNDPTS(4)
+      INTEGER BOUNDPTS(4), SFCDER(NSFCDER), NSFCDER
+      INTEGER NXSFC, NYSFC
       DOUBLE PRECISION BOUNDINTERP(4), DIRRAD(NSTOKES,4)
-      DOUBLE PRECISION XB, YB
+      DOUBLE PRECISION XB, YB, TRANSMIT
+      DOUBLE PRECISION    SFCGRAD_RAY(NSTOKES,NSFCDER,*)
+      REAL    SFCGRAD(NSTOKES,NSFCDER,4)
       REAL    GRIDPOS(3,*), RADBND(NSTOKES)
       REAL    WTDO(NMU,*), MU(NMU), PHI(NMU,*)
       REAL    WAVELEN, SOLARMU, SOLARAZ, DIRFLUX(*)
       REAL    SFCGRIDPARMS(NSFCPAR,*), BCRAD(NSTOKES,*)
-      CHARACTER SRCTYPE*1, SFCTYPE*2
-      REAL GNDALBEDO
+      REAL    SFCGRIDRAD(NANG/2 + 1, *), WAVENO(2)
+      CHARACTER SRCTYPE*1, SFCTYPE*2, UNITS*1
+      REAL GNDALBEDO, DTEMP(*), TEMP(*)
+      DOUBLE PRECISION SFCSRCGRAD_RAY(NSTOKES,NANG/2, *)
+      REAL    DELXSFC, DELYSFC
 
+      REAL    SFCRAD_TEMP(NSTOKES,NMU/2,NPHI0MAX)
       DOUBLE PRECISION U, V
-      INTEGER IL, IM, IU, IP, IBC, J
+      INTEGER IL, IM, IU, IP, IBC, J,I,IANG,JA
       LOGICAL LAMBERTIAN
       REAL    X(4), Y(4), RAD(NSTOKES,4), OPI
-      REAL    REFLECT(4,4)
+      REAL    RADEMIS(NSTOKES,4)
+      REAL RADEMISGRAD(NSTOKES,NANG/2,4)
+      REAL    REFLECT(4,4), DPLANCK
+      REAL RX, RY, SFCU, SFCV, SFCINTERP(4)
+      INTEGER SFCPTR(4)
+      INTEGER IX, IY, ISFC, Q
+
       INTEGER GRIDFACE(4,6)
       DATA    GRIDFACE/1,3,5,7, 2,4,6,8,  1,2,5,6, 3,4,7,8,
      .                 1,2,3,4, 5,6,7,8/
@@ -1831,19 +1976,40 @@ C           Do a binary search to locate the bottom boundary point
               ENDIF
             ENDIF
           ELSE
-            CALL VARIABLE_BRDF_SURFACE (NBOTPTS,IBC,IBC, BCPTR(1,2),
+C           Need to get DTEMP for that property grid point
+C           Need surface 
+            CALL PLANCK_DERIVATIVE(SFCGRIDPARMS(1,IBC), UNITS, WAVENO,
+     .                          WAVELEN, DPLANCK)
+            CALL VARIABLE_BRDF_SURFACE_GRAD (NBOTPTS,IBC,IBC, 
+     .             BCPTR(1,2),
      .             NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO, MU2, PHI2,
      .             SRCTYPE, WAVELEN, SOLARMU, SOLARAZ, DIRFLUX,
      .             SFCTYPE, NSFCPAR, SFCGRIDPARMS, NSTOKES,
-     .             BCRAD(:,1+NTOPPTS))
+     .             BCRAD(:,1+NTOPPTS), DIRRAD(1,J), NSFCDER,
+     .             SFCDER, SFCGRAD(:,:,J), DPLANCK)
 
             CALL SURFACE_BRDF (SFCTYPE(2:2), SFCGRIDPARMS(2,IBC),
      .                    WAVELEN, MU2, PHI2, SOLARMU,SOLARAZ,
      .                      NSTOKES, REFLECT)
             DIRRAD(:,J) = OPI*REFLECT(1:NSTOKES,1)*DIRFLUX(IP)
-
           ENDIF
-          RAD(:,J) = BCRAD(:,NTOPPTS+IBC)
+C         Hack to use COMPUTE_TOP_RADIANCES to compute the surface
+C         emission.
+          IANG = 1
+C          SFCRAD_TEMP = 0.0
+          DO I = 1, NMU/2
+            DO JA = 1, NPHI0(I)
+              SFCRAD_TEMP(1,I,JA) = SFCGRIDRAD(IANG+1,IBC)
+              IANG = IANG + 1
+            ENDDO
+          ENDDO
+          CALL COMPUTE_TOP_RADIANCES_GRAD(SRCTYPE,SFCRAD_TEMP,WAVENO,
+     .                  WAVELEN,
+     .                  UNITS,1, NSTOKES, RADEMIS(1,J), NPHI0MAX,
+     .                  NMU,-1,-1,MU2,PHI2,MU,PHI,NPHI0,2,
+     .                  RADEMISGRAD)
+          RAD(:,J) = RADEMIS(:,J) + BCRAD(:,NTOPPTS+IBC)
+
         ENDIF
       ENDDO
       IF (X(2)-X(1) .GT. 0.0) THEN
@@ -1862,6 +2028,42 @@ C           Do a binary search to locate the bottom boundary point
       BOUNDINTERP(4) = U*V
       RADBND(:) = (1-U)*(1-V)*RAD(:,1) + U*(1-V)*RAD(:,2)
      .              + (1-U)*V*RAD(:,3) +     U*V*RAD(:,4)
+
+      DO J=1,4
+        IP = GRIDPTR(GRIDFACE(J,KFACE),ICELL)
+        BOUNDPTS(J) = IP
+        X(J) = GRIDPOS(1,IP)
+        Y(J) = GRIDPOS(2,IP)
+
+        RX = X(J)/DELXSFC
+        RY = Y(J)/DELYSFC
+        IX = MAX(1,MIN(NXSFC,INT(RX)+1))
+        IY = MAX(1,MIN(NYSFC,INT(RY)+1))
+
+        SFCPTR(1) = IX   + (NXSFC+1)*IY
+        SFCPTR(2) = IX   + (NXSFC+1)*(IY+1)
+        SFCPTR(3) = IX+1 + (NXSFC+1)*IY
+        SFCPTR(4) = IX+1 + (NXSFC+1)*(IY+1)
+
+        SFCU = MAX(0.0,MIN(1.0,RX-(IX-1)))
+        SFCV = MAX(0.0,MIN(1.0,RY-(IY-1)))
+
+        SFCINTERP(1) = (1-SFCU)*(1-SFCV)
+        SFCINTERP(2) = SFCU*(1-SFCV)
+        SFCINTERP(3) = (1-SFCU)*SFCV
+        SFCINTERP(4) = SFCU*SFCV
+        DO Q=1,4
+          ISFC =SFCPTR(Q)
+          SFCGRAD_RAY(:,:,ISFC) = SFCGRAD_RAY(:,:,ISFC) +
+     .          TRANSMIT*BOUNDINTERP(J)*SFCGRAD(:,:,J)*
+     .          SFCINTERP(Q)
+          SFCSRCGRAD_RAY(:,:,ISFC) = 
+     .          SFCSRCGRAD_RAY(:,:,ISFC) + 
+     .          TRANSMIT*BOUNDINTERP(J)*RADEMISGRAD(:,:,J)*
+     .          SFCINTERP(Q)
+        ENDDO
+      ENDDO
+
       RETURN
       END
 

@@ -19,6 +19,8 @@ import xarray as xr
 import os
 import importlib
 from datetime import datetime
+import at3d.aerosol
+import at3d.util
 
 def load_standard_atmosphere(search_directory=None, atmosphere_name='tropical'):
     """
@@ -40,7 +42,7 @@ def load_standard_atmosphere(search_directory=None, atmosphere_name='tropical'):
     -------
     atmosphere : xr.Dataset
         Contains the gas concentrations in units of cm^-3 as well as
-        temperature in Kelvin, pressure in millibars and altitude ('z')
+        temperature in Kelvin, pressure in Pa and altitude ('z')
         in kilometers.
     """
 
@@ -286,23 +288,22 @@ class Reptran:
 
             volume_extinctions.append(volume_extinction)
 
-        dimensions = ['wavelength', 'z']
+        dimensions = ['band', 'z']
         other_dims = list(atmosphere.air.dims).remove('pressure')
         if other_dims is not None:
             dimensions += other_dims
 
         atmosphere['gas_absorption'] = (dimensions, np.stack(volume_extinctions, axis=0))
-        atmosphere['weights'] = ('wavelength', self.reference.iwvl_weight[:len(iwvl_band), band_index].data)
-
+        atmosphere['weights'] = ('band', self.reference.iwvl_weight[:len(iwvl_band), band_index].data)
         if 'solar' in self.parameterization_name:
-            atmosphere['irradiance'] = ('wavelength', self.reference.extra[iwvl_band-1].data)
+            atmosphere['irradiance'] = ('band', self.reference.extra[iwvl_band-1].data)
             atmosphere.irradiance.attrs['description'] = 'Extraterrestrial solar flux at representative wavelengths'
             atmosphere.irradiance.attrs['units'] = 'mW / (m2 nm)'
         atmosphere['spectral_integral'] = self.reference.wvl_integral[band_index].data
         atmosphere.spectral_integral.attrs['description'] = 'Integral of band response function over wavelength'
         atmosphere.spectral_integral.attrs['units'] = 'nm'
-        atmosphere = atmosphere.assign_coords({'wavelength': band_wvls.data[:len(iwvl_band)]*1e-3})
-
+        #atmosphere = atmosphere.assign_coords({'wavelength': band_wvls.data[:len(iwvl_band)]*1e-3})
+        atmosphere.coords['wavelength'] = ('band', band_wvls.data[:len(iwvl_band)]*1e-3)
         atmosphere.gas_absorption.attrs['description'] = 'Volume Extinction Coefficient in units of 1/km derived from REPTRAN'
         atmosphere['band_name'] = short_name
         atmosphere.attrs['parameterization_name'] = self.parameterization_name
@@ -310,3 +311,63 @@ class Reptran:
         atmosphere['created'] = datetime.now()
 
         return atmosphere
+
+def calc_microwave_gas_absorption(atmosphere, frequency):
+    """
+    Calculates gas absorption due to gases in the microwave.
+    
+    Gas absorption is calculated based on the method of Liebe (1985).
+    Absorption calculations depend on only pressure, temperature and humidity,
+    (e.g. H2O and O2) are included. The model is valid only for frequencies
+    lower than 300 GHz.
+
+    Reference
+    ---------
+    Liebe, H. J. (1985), An updated model for millimeter wave propagation in moist air, Radio Sci., 20(5), 1069–1089, doi:10.1029/RS020i005p01069.
+
+    Parameters
+    ----------
+        atmosphere : str, xr.Dataset
+            Standard atmosphere options include: 'midlatitude_summer', 'midlatitude_winter', 'tropical', 'subarctic_summer', 'subarctic_winter'. 
+            Otherwise, the `atmosphere` Dataset should follow the conventions of `gas_absorption.load_standard_atmosphere`.
+            It is not necessary for all gases to be present.
+        frequency : float, array_like
+            The frequency (GHz) in which to calculate the gas absorption.
+
+    Returns
+    -------
+    gas_absorption : xr.Dataset
+        A deep copy of `atmosphere` with the associated volume extinction
+        coefficients added for each wavelength. The atmosphere includes only
+        the effective properties such as pressure (mb), relative humidity, temperature (K).
+    """
+
+    if isinstance(atmosphere, str):
+        atmosphere = at3d.aerosol.aerosol_atmosphere(atmosphere_name=atmosphere)
+    elif isinstance(atmosphere, xr.Dataset):
+        atmosphere = at3d.aerosol.aerosol_atmosphere(atmosphere=atmosphere)
+
+    frequency = np.atleast_1d(frequency)
+    if np.any(frequency > 300):
+        raise ValueError(
+            "The maximum valid value of frequency is 300 GHz for this gas absorption model."
+        )
+    n = atmosphere.z.size
+    gas_abses = []
+    for frequency in frequency:
+        gas_abs = at3d.core.calc_mw_gas_absorption(
+            temperature=atmosphere.temperature.values,
+            frequency=np.ones(n)*frequency,
+            relative_humidity=atmosphere.humidity.values,
+            pressure=1e-2*atmosphere.pressure.values,
+            n=n
+        )
+        gas_absorption = atmosphere.copy(deep=True)
+        gas_abs = -np.log(10**(-0.1*gas_abs))/2.0 # convert from two-way dB/km to ext in 1/km
+        gas_absorption.coords['wavelength'] = ('wavelength',np.atleast_1d(at3d.util.freq_to_wavelength(frequency)))
+        gas_absorption['gas_absorption'] = (['wavelength', 'z'], gas_abs[None,:])
+        gas_abses.append(gas_absorption)
+
+    gas_absorption = xr.merge(gas_abses)
+
+    return gas_absorption 

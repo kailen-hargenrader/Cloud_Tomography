@@ -1920,7 +1920,7 @@ class RTE:
                                       dtype=np.float32,
                                       order='F')
 
-        if self._sfctype not in ('FL', 'VL', 'VW', 'VD', 'VO', 'VR', 'VP'):
+        if self._sfctype not in ('FL', 'VL', 'VW', 'VD', 'VO', 'VR', 'VP','VM'):
             raise ValueError("surface type '{}' not recognized. "
                              "Make sure to choose a supported surface from"
                              " surface.py".format(self._sfctype))
@@ -1985,6 +1985,10 @@ class RTE:
         self._angle_set = numerical_params.angle_set.data
         self._transcut = numerical_params.transcut.data
         self._transmin = numerical_params.transmin.data
+
+        self._max_scat_angle = 721
+        if 'max_scat_angle' in numerical_params:
+            self._max_scat_angle = numerical_params['max_scat_angle'].data
 
         if self._deltam.dtype != bool:
             raise TypeError("numerical_params.deltam should be of boolean type.")
@@ -2387,7 +2391,7 @@ class RTE:
         self._nleg = self._ml + 1 if self._deltam else self._ml
 
         self._pa.nlegp = max(legendre_table.sizes['legendre_index'] - 1, self._nleg)
-        self._nscatangle = max(36, min(721, 2 * self._pa.nlegp))
+        self._nscatangle = max(36, min(self._max_scat_angle, 2 * self._pa.nlegp))
 
         # Check if legendre table needs padding. It will only need
         # padding if angular resolution is larger than the number of
@@ -2566,23 +2570,43 @@ class RTE:
             )
 
         # Set the non-thermal surface emission. NB involves a redundant
-        # calculation of the Angle set.
-        # is also memory intensive.
-        nphi0, mu, phi, wtmu, wtdo, fftflag, nang = at3d.core.make_angle_set(
+        # Calculate Angle set and transform coeffs as we need this for
+        # surface and volume source evaluation.
+        self._nphi0,  self._mu,  self._phi,  self._wtmu,  self._wtdo, \
+        self._fftflag,  self._nang = at3d.core.make_angle_set(
             nmu=self._nmu,
             nphi=self._nphi,
             itype=self._angle_set,
             nphi0max=self._nphi0max
         )
 
-        mus = mu[:,None]*np.ones(phi.shape)
+        self._cmu1,  self._cmu2,  self._cphi1,  self._cphi2,  self._wphisave, \
+         = at3d.core.make_sh_do_coef(
+            nstleg=self._nstleg,
+            ml=self._ml,
+            mm=self._mm,
+            nlm=self._nlm,
+            nmu=self._nmu,
+            nphi0=self._nphi0,
+            nphi0max=self._nphi0max,
+            fftflag=self._fftflag,
+            mu=self._mu,
+            phi=self._phi,
+            wtmu=self._wtmu,
+            wtdo=self._wtdo
+        )
+
+        # Set the non-thermal surface emission. NB involves a redundant
+        # calculation of the Angle set.
+        # is also memory intensive.
+        mus = self._mu[:,None]*np.ones(self._phi.shape)
         mu_all = []
         phi_all = []
         weight_all = []
         for i in range(self._nmu//2, self._nmu):
-            mu_all.extend(mus[i,:nphi0[i]])
-            phi_all.extend(phi[i,:nphi0[i]])
-            weight_all.extend(wtdo[i,:nphi0[i]]*np.abs(mu[i]))
+            mu_all.extend(mus[i,:self._nphi0[i]])
+            phi_all.extend(self._phi[i,:self._nphi0[i]])
+            weight_all.extend(self._wtdo[i,:self._nphi0[i]]*np.abs(self._mu[i]))
         mu_all = np.array(mu_all)
         phi_all = np.array(phi_all)
         weight_all = np.array(weight_all)
@@ -2596,7 +2620,7 @@ class RTE:
         phi_all = phi_all[None,:]*np.ones(x.shape)
         rads = self._surface_source(x.ravel(),y.ravel(),mu_all.ravel(),phi_all.ravel())
 
-        surface_rad_source = np.asfortranarray(rads.reshape(y.shape).T.reshape(nang//2, self._nx1+1, self._ny1+1))
+        surface_rad_source = np.asfortranarray(rads.reshape(y.shape).T.reshape(self._nang//2, self._nx1+1, self._ny1+1))
         self._surface_rad_flux = np.sum(surface_rad_source*weight_all[:,None,None],axis=0).mean()
         self._surface_rad_source = np.append(np.zeros((1,self._nx1+1,self._ny1+1)), surface_rad_source,axis=0)
 

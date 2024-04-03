@@ -2,6 +2,7 @@
 Utility functions for at3d. These are not critical to its operation.
 """
 import typing
+import pickle
 
 import numpy as np
 from collections import OrderedDict
@@ -347,6 +348,11 @@ def planck_function(temperature, wavelength, c=2.99792458e8, h=6.62606876e-34, k
     radiance = 2*h*c**2/ wavelength**5 *1.0/(np.exp((h*c)/(wavelength*k*temperature)) - 1.0)*1e-6
     return radiance
 
+def freq_to_wavelength(mu):
+    """Convert frequency in GHz to wavelength in Microns.
+    """
+    return 1e6*(299792458.0/(mu*1e9))
+
 def cell_average_comparison(reference, other, variable_name):
     """
     calculates average values of 'variable name' in the cells
@@ -539,6 +545,9 @@ def load_forward_model(file_name, load_solver=True):
             surface = xr.open_dataset(xr.backends.NetCDF4DataStore(dataset['solvers/'+str(key)+'/surface']))
             source = xr.open_dataset(xr.backends.NetCDF4DataStore(dataset['solvers/'+str(key)+'/source']))
 
+            surface = unpickle_objects(surface)
+            source = unpickle_objects(source)
+
             mediums = OrderedDict()
             for name, med in solver['medium'].groups.items():
                 mediums[name] = xr.open_dataset(xr.backends.NetCDF4DataStore(dataset[
@@ -640,8 +649,12 @@ def save_forward_model(file_name, sensors, solvers):
         numerical_params = solver.numerical_params
         numerical_params['num_stokes'] = solver._nstokes
         solver.numerical_params.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'numerical_parameters')
-        solver.surface.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'surface')
-        solver.source.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'source')
+        
+        # pickle `Objects`.
+        surface = pickle_objects(solver.surface)
+        surface.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'surface')
+        source = pickle_objects(solver.source)
+        source.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'source')
         solver._grid.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'grid')
         if solver.atmosphere is not None:
             solver.atmosphere.to_netcdf(file_name,'a', group='solvers/'+str(key)+'/'+'atmosphere')
@@ -783,3 +796,17 @@ def load_transforms_from_file(file_name):
                 coordinate_transforms[group_name] = coordinate_transform
 
     return state_to_grid_transforms, coordinate_transforms
+
+
+def pickle_objects(dset):
+    for name, var in dset.data_vars.items():
+        if var.dtype == 'object':
+            dset[name] = ('pickle_length', np.frombuffer(pickle.dumps(var.values.item()),dtype=np.uint8))
+    return dset
+
+def unpickle_objects(dset):
+    for name, var in dset.data_vars.items():
+        if len(var.dims) == 1:
+            if var.dims[0] == 'pickle_length':
+                dset[name] = pickle.loads(var.values.tobytes())
+    return dset

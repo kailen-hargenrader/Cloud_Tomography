@@ -340,7 +340,7 @@ C        Precompute Ylm's for solar direction
       IF (SRCTYPE .NE. 'T') THEN
         CALL YLMALL (.TRUE., SOLARMU, SOLARAZ, ML, MM, NSTLEG, YLMSUN)
       ENDIF
-
+C    TODO NOW CALLED FROM PYTHON SO THIS IS A DUPLICATED CALCULATION.
 C        Make the discrete ordinates (angles)
 C       (set 2 is reduced gaussian, 3 is reduced double gauss)
       CALL MAKE_ANGLE_SET (NMU, NPHI, ORDINATESET, NPHI0MAX,
@@ -2371,7 +2371,7 @@ C       at discrete ordinate points or interpolated to a specific
 C       MU, PHI. The latter is only done when evaluating a radiance
 C       (not during the solution iterations) and only affects
 C       upward looking (ground based) instruments.
-
+      SKYRAD3(:) = 0.0
       IF (INTERPOLATE_FLAG .EQ. 1) THEN
 C     Inverse distance weighting interpolation (Cubic).
 C     Distance is based on the scattering angle between the two angles.
@@ -2384,7 +2384,7 @@ C     Distance is based on the scattering angle between the two angles.
      .          SQRT((1.0-MU**2)*(1.0-MUS(I)**2))*
      .          COS(PHI-PHIS(I,J)))
             IF (ABS(DISTANCE) .LT. 1E-6) THEN
-              WEIGHT = 1.0E8
+              WEIGHT = 1.0D8
             ELSE
               WEIGHT = 1.0D0/(DISTANCE**POWER)
             ENDIF
@@ -2392,7 +2392,7 @@ C     Distance is based on the scattering angle between the two angles.
             WEIGHTSUM = WEIGHTSUM + WEIGHT
           ENDDO
         ENDDO
-        SKYRAD3 = WEIGHTEDSUM/WEIGHTSUM
+        SKYRAD3(1:1) = WEIGHTEDSUM/WEIGHTSUM
       ELSE IF (INTERPOLATE_FLAG .EQ. 2) THEN
 C       For surface.
         POWER = 3.0D0
@@ -2404,7 +2404,7 @@ C       For surface.
      .          SQRT((1.0-MU**2)*(1.0-MUS(I)**2))*
      .          COS(PHI-PHIS(I,J)))
             IF (ABS(DISTANCE) .LT. 1E-6) THEN
-              WEIGHT = 1.0E8
+              WEIGHT = 1.0D8
             ELSE
               WEIGHT = 1.0D0/(DISTANCE**POWER)
             ENDIF
@@ -2413,7 +2413,7 @@ C       For surface.
             WEIGHTSUM = WEIGHTSUM + WEIGHT
           ENDDO
         ENDDO
-        SKYRAD3 = WEIGHTEDSUM/WEIGHTSUM
+        SKYRAD3(1:1) = WEIGHTEDSUM/WEIGHTSUM
       ELSE
         SKYRAD3 = SKYRAD(:,IMU,IPHI)
       ENDIF
@@ -2528,6 +2528,72 @@ C         Loop over all bottom points
       RETURN
       END
 
+      SUBROUTINE COMBINED_VARIABLE_BRDF_SURFACE(NBOTPTS, IBEG, IEND, 
+     .    BCPTR,
+     .    NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO, MU2, PHI2,
+     .    SRCTYPE, WAVELEN, SOLARMU, SOLARAZ, DIRFLUX,
+     .    SFCTYPE, NSFCPAR, SFCGRIDPARMS, NSTOKES, BCRAD)
+      IMPLICIT NONE
+      INTEGER NBOTPTS, IBEG, IEND, BCPTR(NBOTPTS)
+      INTEGER NMU, NPHI0MAX, NPHI0(NMU), NSFCPAR, NSTOKES
+      REAL    WTDO(NMU,NPHI0MAX), MU(NMU), PHI(NMU,NPHI0MAX)
+      REAL    MU2, PHI2, WAVELEN, SOLARMU, SOLARAZ, DIRFLUX(*)
+      REAL    SFCGRIDPARMS(NSFCPAR,NBOTPTS), BCRAD(NSTOKES,NBOTPTS,*)
+      CHARACTER*2 SFCTYPEGRID(4,NBOTPTS)
+      REAL    SFCTYPEWT(4,NBOTPTS)
+      CHARACTER SRCTYPE*1, SFCTYPE*2
+
+      CHARACTER*2 SFCTYPEI 
+      INTEGER Q, ISFCPARM, IBC
+      INTEGER NSFCPARI
+      REAL    BCRADTEMP(NSTOKES), WT
+
+      IF (SFCTYPE(2:2) .EQ. 'C') THEN
+C       Handle multiple surface types present, including
+C       weighted mixtures.
+        DO IBC = IBEG, IEND
+          BCRADTEMP(:) = 0.0
+          ISFCPARM = 1
+          DO Q=1,4
+            WT = SFCTYPEWT(Q,IBC)
+            SFCTYPEI = SFCTYPEGRID(Q,IBC)
+C           Find how many surface parameters are used by each type.
+C           Using conditionals instead of more efficient dictionaries.
+            IF (SFCTYPEI(2:2) .EQ. 'L') THEN
+              NSFCPARI = 2
+            ELSEIF (SFCTYPEI(2:2) .EQ. 'W') THEN
+              NSFCPARI = 4
+            ELSEIF (SFCTYPEI(2:2) .EQ. 'O') THEN
+              NSFCPARI = 3
+            ELSEIF (SFCTYPEI(2:2) .EQ. 'R') THEN
+              NSFCPARI = 4
+            ELSEIF (SFCTYPEI(2:2) .EQ. 'D') THEN
+              NSFCPARI = 6
+            ENDIF
+            CALL VARIABLE_BRDF_SURFACE(NBOTPTS, IBC, IBC, BCPTR,
+     .               NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO, MU2, PHI2,
+     .               SRCTYPE, WAVELEN, SOLARMU, SOLARAZ, DIRFLUX,
+     .               SFCTYPEI, NSFCPARI, SFCGRIDPARMS(ISFCPARM,:), 
+     .               NSTOKES,BCRAD)
+            BCRADTEMP(:) = BCRADTEMP(:) + WT*BCRAD(:,IBC,1)
+            ISFCPARM = ISFCPARM + NSFCPARI
+          ENDDO
+          BCRAD(:,IBC,1) = BCRADTEMP
+        ENDDO
+      ELSE
+C       
+        CALL VARIABLE_BRDF_SURFACE(NBOTPTS, IBEG,IEND, BCPTR,
+     .               NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO, MU2, PHI2,
+     .               SRCTYPE, WAVELEN, SOLARMU, SOLARAZ, DIRFLUX,
+     .               SFCTYPE, NSFCPAR, SFCGRIDPARMS, NSTOKES, 
+     .               BCRAD)
+      ENDIF
+      RETURN
+      END
+      
+      
+
+
       SUBROUTINE VARIABLE_BRDF_SURFACE (NBOTPTS, IBEG, IEND, BCPTR,
      .               NMU, NPHI0MAX, NPHI0, MU, PHI, WTDO, MU2, PHI2,
      .               SRCTYPE, WAVELEN, SOLARMU, SOLARAZ, DIRFLUX,
@@ -2559,70 +2625,22 @@ C     are output in BCRAD(*,*,1).
       INTEGER JMU, JPHI, IBC, I, JANG, K, K1, K2
       REAL    OPI, REFLECT(4,4), W, SUM0, SUM1, RADSPEC(4)
 
-      INTEGER L,IMU, IPHI
-      REAL BESTDIFF, DIFF
-      LOGICAL INTERPOLATE
+      ! INTEGER L,IMU, IPHI
+      ! REAL BESTDIFF, DIFF
+      ! LOGICAL INTERPOLATE
 
       OPI = 1.0/ACOS(-1.0)
-
-
-      IF (SFCTYPE .EQ. 'VP') THEN
-C      Special case where we have prescribed upwelling radiance at the
-C      bottom boundary that is independent of the downwelling (no reflection).
-C      Note that this should only be called
-C      when the upwelling directions are the set of discrete ordinate directions
-C      Other input values of MU2 and PHI2 will cause the program to STOP.
-        INTERPOLATE = .FALSE.
-        BESTDIFF = 1e8
-        DO L=1,NMU
-          DIFF = ABS(MU(L) - MU2)
-          IF (DIFF .LT. BESTDIFF) THEN
-            BESTDIFF = DIFF
-            IMU = L
-          ENDIF
-        ENDDO
-        IF (BESTDIFF .GT. 1e-6) THEN
-          INTERPOLATE = .TRUE.
-        ENDIF
-
-        BESTDIFF = 1e8
-        DO L=1,NPHI0(IMU)
-          DIFF = ABS(PHI(IMU,L) - PHI2)
-          IF (DIFF .LT. BESTDIFF) THEN
-            BESTDIFF = DIFF
-            IPHI = L
-          ENDIF
-        ENDDO
-        IF (BESTDIFF .GT. 1e-6) THEN
-          INTERPOLATE = .TRUE.
-        ENDIF
-
-        IF (INTERPOLATE) THEN
-          STOP 'NON DISCRETE ORDINATE DIRECTION NOT CURRENTLY SUPPORTED'
-        ENDIF
-        I = (sum(NPHI0(NMU/2 + 1:IMU-1)) + IPHI)*NSTOKES
-
-        IF (I .GT. NSFCPAR) THEN
-          PRINT *, I, NSFCPAR, IMU, IPHI, NMU, NPHI0(IMU), NSTOKES
-          STOP 'BAD INDEX IN PRESCRIBED SURFACE EMISSION'
-        ENDIF
-        DO IBC = IBEG, IEND
-          BCRAD(:,IBC,1) = SFCGRIDPARMS(1+I,IBC)
-        ENDDO
-
-      ELSE
-
       DO IBC = IBEG, IEND
-
 C         Initialize the upwelling boundary radiances to zero or to
 C           the reflection of direct unpolarized solar flux.
         BCRAD(:,IBC,1) = 0.0
         IF (SRCTYPE .NE. 'T') THEN
           I = BCPTR(IBC)
-          CALL SURFACE_BRDF (SFCTYPE(2:2), SFCGRIDPARMS(2,IBC),WAVELEN,
-     .                    MU2, PHI2, SOLARMU,SOLARAZ, NSTOKES, REFLECT)
+          CALL SURFACE_BRDF (SFCTYPE(2:2), SFCGRIDPARMS(2,IBC),
+     .                    WAVELEN,MU2, PHI2, SOLARMU,SOLARAZ, 
+     .                    NSTOKES, REFLECT)
           BCRAD(:,IBC,1) = BCRAD(:,IBC,1)
-     .                    + OPI*REFLECT(1:NSTOKES,1)*DIRFLUX(I)
+     .                   + OPI*REFLECT(1:NSTOKES,1)*DIRFLUX(I)
         ENDIF
 
 C         Integrate over the incident discrete ordinate directions (JMU,JPHI)
@@ -2630,13 +2648,13 @@ C         Integrate over the incident discrete ordinate directions (JMU,JPHI)
         DO JMU = 1, NMU/2
           DO JPHI = 1, NPHI0(JMU)
             CALL SURFACE_BRDF (SFCTYPE(2:2), SFCGRIDPARMS(2,IBC),
-     .                     WAVELEN, MU2,PHI2, MU(JMU),PHI(JMU,JPHI),
-     .                     NSTOKES, REFLECT)
+     .                       WAVELEN, MU2,PHI2, MU(JMU),PHI(JMU,JPHI),
+     .                      NSTOKES, REFLECT)
             W = OPI*ABS(MU(JMU))*WTDO(JMU,JPHI)
-C             Add in the polarized reflection
+C               Add in the polarized reflection
             DO K1 = 1, NSTOKES
               BCRAD(:,IBC,1) = BCRAD(:,IBC,1)
-     .                   + W*REFLECT(1:NSTOKES,K1)*BCRAD(K1,IBC,JANG+1)
+     .               + W*REFLECT(1:NSTOKES,K1)*BCRAD(K1,IBC,JANG+1)
             ENDDO
 C             Add in the polarized thermal emission
             BCRAD(1,IBC,1) = BCRAD(1,IBC,1)
@@ -2646,9 +2664,7 @@ C             Add in the polarized thermal emission
             JANG = JANG + 1
           ENDDO
         ENDDO
-
       ENDDO
-      ENDIF
       RETURN
       END
 

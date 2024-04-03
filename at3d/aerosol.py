@@ -351,6 +351,7 @@ class OPACMixture:
             The aerosol optical properties on the grid of `atmosphere` with wavelengths
             as keys.
         """
+        wavelengths = np.atleast_1d(wavelengths)
         if any(wavelengths < 0.25) or any(wavelengths > 40.0):
             raise ValueError(
                 "`wavelengths` are outside the expected range of 0.25 to 40 micrometers. Check units of input."

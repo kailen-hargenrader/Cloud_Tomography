@@ -1160,11 +1160,15 @@ C     The FFTPACK phase coefficients for the FFT in azimuth are also
 C     output in WPHISAVE.
       IMPLICIT NONE
       INTEGER NSTLEG, ML, MM, NLM, NMU, NPHI0(NMU), NPHI0MAX
+Cf2py intent(in) :: NSTLEG, ML, MM, NLM, NMU, NPHI0, NPHI0MAX
       LOGICAL FFTFLAG(NMU)
+Cf2py intent(in) :: FFTFLAG
       REAL    MU(NMU), PHI(NMU,*), WTMU(NMU), WTDO(NMU,*)
+Cf2py intent(in) :: MU, PHI, WTMU, WTDO
       REAL    CMU1(NSTLEG,NLM,NMU), CMU2(NSTLEG,NMU,NLM)
       REAL    CPHI1(-16:16,32,NMU), CPHI2(32,-16:16,NMU)
       REAL    WPHISAVE(3*NPHI0MAX+15,NMU)
+Cf2py intent(out) :: CMU1, CMU2, CPHI1, CPHI2, WPHISAVE
       INTEGER I, J, K, M, Q
       REAL    X, W
       REAL, ALLOCATABLE :: PRC(:,:)
@@ -1215,12 +1219,9 @@ C             Precompute the phase factors for the FFTs
       RETURN
       END
 
-
-
-
-
       SUBROUTINE SURFACE_BRDF (SFCTYPE, REFPARMS, WAVELEN,
-     .                         MU2, PHI2, MU1, PHI1, NSTOKES, REFLECT)
+     .                         MU2, PHI2, MU1, PHI1, NSTOKES, 
+     .                         REFLECT)
 C       Returns the reflection matrix for the general bidirectional
 C     reflection distribution function of the specified type (SFCTYPE).
 C     The incident direction is (MU1,PHI1), and the outgoing direction
@@ -1247,7 +1248,7 @@ C       R  RPV-original  rho0, k, Theta
 !f2py intent(out) :: REFLECT
 
       INTEGER K1, K2
-      REAL   PI
+      REAL   PI, KGEO, KVOL
       REAL   RPV_REFLECTION
 
       PI = ACOS(-1.0)
@@ -1282,8 +1283,16 @@ C         O: Ocean BRDF from 6S modified by Norm Loeb
         ENDIF
         CALL ocean_brdf_sw (REFPARMS(1), -1., REFPARMS(2), WAVELEN,
      .                      -MU1, MU2, PHI1-PHI2, PHI1, REFLECT(1,1))
-      ELSE IF (SFCTYPE .EQ. 'P') THEN
-        PRINT *, 'THIS SHOULD NEVER BE CALLED'
+      ELSE IF (SFCTYPE .EQ. 'M') THEN
+C         M: RossLiThick-Sparse surface brdf used by MODIS.
+          IF (NSTOKES .GT. 1) THEN
+            PRINT *, 'RossLiThick-Sparse is only for unpolarized case'
+            STOP
+          ENDIF
+          CALL ROSS_THICK_LI_SPARSE(REFPARMS(1), REFPARMS(2), 
+     .                              REFPARMS(3), 2.0,
+     .                              1.0, -MU1,MU2,PHI1-PHI2,
+     .                              REFLECT(1,1), KGEO,KVOL)
       ELSE
         STOP 'SURFACE_BRDF: Unknown BRDF type'
       ENDIF
@@ -1291,9 +1300,60 @@ C         O: Ocean BRDF from 6S modified by Norm Loeb
       RETURN
       END
 
+      SUBROUTINE ROSS_THICK_LI_SPARSE(FISO, FGEO, FVOL,
+     .                              HB, BR,
+     .                              MUDOWN,MUUP,RELAZ,
+     .                              REFLECT,KGEO,KVOL)
+      IMPLICIT NONE
+      REAL :: FISO, FGEO, FVOL, MUDOWN, MUUP, RELAZ,REFLECT
+      REAL :: HB, BR, KGEO,KVOL
+Cf2py intent(in) :: FISO,FGEO,FVOl, MUDOWN, MUUP, RELAZ
+Cf2py intent(in) :: HB, BR
+Cf2py intent(out) :: REFLECT, KGEO,KVOL
 
+C     Do kernel calculations in double precision.
+      INTEGER, parameter :: r=kind(1.0d0)
+      REAL(kind=r) PI, COSETA, DSQ, COST
+      REAL(kind=r) MU_D, MU_U, SEC_D, SEC_U, O, THETA_D, THETA_U
+      REAL(kind=r) TAN_D, TAN_U
+      PI = ACOS(-1.0D0)
+      
+C     Volume Scattering Kernel.
+      COSETA = MUDOWN*MUUP + SQRT(1.0 - MUDOWN**2)*
+     .                  SQRT(1.0 - MUUP**2)*COS(RELAZ)
+      KVOL = (((PI/2.0 - ACOS(COSETA))*COSETA + SQRT(1.0-COSETA**2))/
+     .                    (MUDOWN + MUUP)) - PI/4.0
+C     Geometric Kernel.
+      THETA_D = ABS(ATAN(BR*SQRT(1.0D0 - MUDOWN**2)/MUDOWN))
+      THETA_U = ABS(ATAN(BR*SQRT(1.0D0 - MUUP**2)/MUUP))
+      MU_D = COS(THETA_D)
+      MU_U = COS(THETA_U)
+      COSETA = MU_D*MU_U + SQRT(1.0D0 - MU_D**2)*
+     .              SQRT(1.0D0 - MU_U**2)*COS(RELAZ)
+      SEC_D = 1.0D0/MU_D
+      SEC_U = 1.0D0/MU_U
 
+      TAN_D = SQRT(1.0D0 - MU_D**2)/MU_D
+      TAN_U = SQRT(1.0D0 - MU_U**2)/MU_U
+      
+      DSQ = TAN_D**2 + TAN_U**2 - 2*TAN_U*TAN_D*COS(RELAZ)
+      COST = HB*SQRT(DSQ + (TAN_D*TAN_U*SIN(RELAZ))**2)/
+     .        (SEC_D + SEC_U)
+      
+      IF (COST .GE. 1.0D0) COST = 1.0D0
+      IF (COST .LE. -1.0D0) COST = -1.0D0
 
+      O = (ACOS(COST) - COST*SQRT(1.0D0 - COST**2))*(SEC_D + SEC_U)/PI
+      KGEO = O - SEC_D - SEC_U + 0.5D0*(1.0D0+COSETA)*SEC_U*SEC_D
+
+C     Sum Kernels.
+      REFLECT = FISO + FVOL*KVOL + FGEO*KGEO
+      REFLECT = MAX(REFLECT, 0.0)
+      ! PRINT *, MU_D, MU_U, RELAZ, SEC_D, SEC_U, TAN_D, TAN_U
+      ! PRINT *, DSQ, COST, O
+      ! PRINT *, KVOL, KGEO
+
+      END
 
       SUBROUTINE WAVE_FRESNEL_REFLECTION (MRE, MIM, WINDSPEED,
      .                         MUI, MUR, PHII, PHIR, NSTOKES, REFLECT)
@@ -2195,7 +2255,57 @@ C      ENDIF
 C      RETURN
 C      END
 
+! SUBROUTINE NADAL_BREON_BPDF(ALPHA, BETA, MR,
+!   .            MI,
+!   .            MUDOWN, MUUP,RELAZ,P21,P31)
+!    IMPLICIT NONE
+!    REAL ALPHA, BETA, MR,MI, MUDOWN,MUUP,RELAZ,P21,P31
 
+!    INTEGER, parameter :: r=kind(1.0d0)
+!    REAL(kind=r) FP,COSETA,THETAR, MUR, THETAT, MUT
+!    REAL(kind=r) PI, RP, COSN, SINN
+!    COMPLEX(kind=r) M
+
+!    M = COMPLEX(MR,MI)
+   
+!    PI = ACOS(-1.0D0)
+
+!    COSETA = MUDOWN*MUUP + SQRT(1.0 - MUDOWN**2)*
+!   .                  SQRT(1.0 - MUUP**2)*COS(RELAZ)
+!    THETAR = (PI - ACOS(COSETA))/2.0D0
+!    MUR = COS(THETAR)
+!    THETAT = ASIN(M*SQRT(1.0-MUR**2))
+!    MUT = COS(THETAT)
+
+!    FP = 0.5D0*(((M*MUT - MUR)/(M*MUT+MUR))**2 - 
+!   .            ((M*MUR - MUT)/(M*MUR+MUT))**2)
+!    RP = ALPHA*(1.0D0 - EXP(-BETA*(FP)/(MUDOWN + MUUP)))
+
+!    COSN = -(MUDOWN + MUUP*COSETA)/(SIN(RELAZ)*SQRT(1.0-COSETA**2))
+!    SINN = SQRT(1.0-MUDOWN**2)*SQRT(1.0-MUUP**2)/(SQRT(1.0-COSETA**2))
+!    P21 = -RP*(1.0D0 - 2.0D0*SINN*SINN)
+!    P31 = RP*(2*COSN*SINN)
+!    END
+
+!    SUBROUTINE ROSSLITHICK_W_BPDF(FISO,FGEO,FVOL,HB,BR,
+!   .            ALPHA,BETA,MR,MI,MUDOWN,MUUP,RELAZ,REFLECT)
+!    IMPLICIT NONE
+!    REAL :: FISO, FGEO, FVOL, MUDOWN, MUUP, RELAZ
+!    REAL :: HB, BR, ALPHA, BETA, MR,MI
+!    REAL :: REFLECT(4,4), P21, P31
+
+!    REFLECT(:,:) = 0.0
+!    CALL ROSS_LI_THICK_SPARSE(FISO, FGEO, FVOL,
+!   .                              HB, BR,
+!   .                              MUDOWN,MUUP,RELAZ,
+!   .                              REFLECT(1,1))
+
+!    CALL NADAL_BREON_BPDF(ALPHA,BETA,MR,MI,
+!   .                              MUDOWN,MUUP,RELAZ,
+!   .                              P21,P31)
+!    REFLECT(2,1) = P21
+!    REFLECT(3,1) = P31
+!    END
 
 
       SUBROUTINE INTEGRATE_1RAY (BCFLAG, IPFLAG, NSTOKES, NSTLEG,

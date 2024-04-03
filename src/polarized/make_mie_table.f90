@@ -10,7 +10,7 @@
 SUBROUTINE GET_MIE_TABLE (NRETAB, MAXLEG, WAVELEN1, WAVELEN2, WAVELENCEN, DELTAWAVE, &
                           PARDENS, SRETAB, ERETAB, ALPHA, GAMMA, MAXRADIUS, RINDEX, PARTYPE, &
                           AVGFLAG, DISTFLAG, REFF, EXTINCT,SSALB,NLEG,LEGCOEF,LOGRE, &
-                          VERBOSE, IERR, ERRMSG)
+                          VERBOSE, IERR, ERRMSG, TEMP)
 !
 ! Does Mie computations to create a scattering table as a function of
 ! effective radius for gamma, modified gamma, or lognormal size distributions
@@ -45,8 +45,8 @@ SUBROUTINE GET_MIE_TABLE (NRETAB, MAXLEG, WAVELEN1, WAVELEN2, WAVELENCEN, DELTAW
   INTEGER :: NSIZE, I, J, L, NL
   INTEGER, INTENT(IN) :: MAXLEG
 !  f2py intent(in) :: MAXLEG
-  REAL :: SCATTER, WAVELENCEN
-!  f2py intent(in) :: WAVELENCEN
+  REAL :: SCATTER, WAVELENCEN, TEMP
+!  f2py intent(in) :: WAVELENCEN, TEMP
   REAL, INTENT(OUT) :: REFF(NRETAB), EXTINCT(NRETAB), SSALB(NRETAB)
 !  f2py intent(out) :: REFF, EXTINCT, SSALB
   REAL, INTENT(OUT) :: NLEG(NRETAB), LEGCOEF(6,0:MAXLEG,NRETAB)
@@ -66,7 +66,8 @@ SUBROUTINE GET_MIE_TABLE (NRETAB, MAXLEG, WAVELEN1, WAVELEN2, WAVELENCEN, DELTAW
 
    ! Get the average index of refraction for water or ice
   IF (PARTYPE /= 'A') THEN
-    CALL GET_REFRACT_INDEX (PARTYPE, WAVELEN1, WAVELEN2, RINDEX)
+    CALL GET_REFRACT_INDEX (PARTYPE, WAVELEN1, WAVELEN2, RINDEX, &
+                         TEMP)
   ENDIF
 
    ! Figure the number of radii there will be
@@ -325,7 +326,8 @@ END SUBROUTINE GET_CENTER_WAVELEN
 
 
 
-SUBROUTINE GET_REFRACT_INDEX (PARTYPE, WAVELEN1, WAVELEN2, RINDEX)
+SUBROUTINE GET_REFRACT_INDEX (PARTYPE, WAVELEN1, WAVELEN2, RINDEX, &
+                              TEMP)
  ! Returns the index of refraction for water or ice averaged over
  ! the wavelength interval (WAVELEN1 < WAVELEN2 [microns]).   The
  ! averaging is done at 0.05 micron intervals and is weighted by
@@ -336,7 +338,7 @@ SUBROUTINE GET_REFRACT_INDEX (PARTYPE, WAVELEN1, WAVELEN2, RINDEX)
  ! (the temperature dependence is important in the microwave).
   IMPLICIT NONE
   CHARACTER(LEN=1), INTENT(IN) :: PARTYPE
-  REAL, INTENT(IN) :: WAVELEN1, WAVELEN2
+  REAL, INTENT(IN) :: WAVELEN1, WAVELEN2, TEMP
   COMPLEX, INTENT(OUT) :: RINDEX
   REAL :: WAVECEN, DELWAVE, WAVE, BBTEMP, PLANCK
   REAL :: MRE, MIM, SUMP, SUMMR, SUMMI, A
@@ -360,9 +362,9 @@ SUBROUTINE GET_REFRACT_INDEX (PARTYPE, WAVELEN1, WAVELEN2, RINDEX)
     IF (BBTEMP > 0) PLANCK = (1.19E8/WAVE**5)/(EXP(1.439E4/(WAVE*BBTEMP))-1)
     SUMP = SUMP + PLANCK
     IF (PARTYPE == 'I') THEN
-      CALL REFICE (0, WAVE, 243.0, MRE, MIM, A, A)
+      CALL REFICE (0, WAVE, TEMP, MRE, MIM, A, A)
     ELSE
-      CALL REFWAT (0, WAVE, 283.0, MRE, MIM, A, A)
+      CALL REFWAT (0, WAVE, TEMP, MRE, MIM, A, A)
     ENDIF
     SUMMR = SUMMR + PLANCK*MRE
     SUMMI = SUMMI + PLANCK*MIM

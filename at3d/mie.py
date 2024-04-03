@@ -46,6 +46,7 @@ def get_mie_band_model(band_model, particle_type,minimum_effective_radius=4.0,
 def get_mono_table(particle_type, wavelength_band, minimum_effective_radius=4.0,
                    max_integration_radius=65.0, wavelength_averaging=False,
                    wavelength_resolution=0.001, refractive_index=None,
+                   temperature=283.15,
                    relative_dir=None, verbose=True):
     """
     Mie monodisperse scattering for spherical particles.
@@ -105,7 +106,7 @@ def get_mono_table(particle_type, wavelength_band, minimum_effective_radius=4.0,
         table_attempt = _load_table(relative_dir, particle_type, wavelength_band,
                                     minimum_effective_radius, max_integration_radius,
                                     wavelength_averaging, wavelength_resolution,
-                                    refractive_index)
+                                    temperature=temperature, refractive_index=refractive_index)
 
     if table_attempt is not None:
         table = table_attempt
@@ -115,14 +116,14 @@ def get_mono_table(particle_type, wavelength_band, minimum_effective_radius=4.0,
         table = _compute_table(particle_type, wavelength_band,
                                minimum_effective_radius, max_integration_radius,
                                wavelength_averaging, wavelength_resolution,
-                               refractive_index, verbose=verbose)
+                               refractive_index, temperature=temperature, verbose=verbose)
 
     return table
 
 def _compute_table(particle_type, wavelength_band,
                    minimum_effective_radius, max_integration_radius,
                    wavelength_averaging, wavelength_resolution,
-                   refractive_index, verbose=True):
+                   refractive_index, temperature=283.15, verbose=True):
     """
     This function does the hard work of computing a monomodal mie table.
     It has python binding for the SHDOM fortran code contained within
@@ -187,7 +188,8 @@ def _compute_table(particle_type, wavelength_band,
         refractive_index = at3d.core.get_refract_index(
             partype=particle_type,
             wavelen1=wavelen1,
-            wavelen2=wavelen2
+            wavelen2=wavelen2,
+            temp=temperature,
         )
         refractive_index_source = 'src/polarized/indexwatice.f'
 
@@ -261,7 +263,8 @@ def _compute_table(particle_type, wavelength_band,
             'wavelength_resolution': wavelength_resolution,
             'maximum_legendre': maxleg,
             'minimum_effective_radius':minimum_effective_radius,
-            'maximum_integration_radius':max_integration_radius
+            'maximum_integration_radius':max_integration_radius,
+            'temperature': temperature,
             },
         )
     return table
@@ -269,6 +272,7 @@ def _compute_table(particle_type, wavelength_band,
 def _load_table(relative_dir, particle_type, wavelength_band,
                 minimum_effective_radius=4.0, max_integration_radius=65.0,
                 wavelength_averaging=False, wavelength_resolution=0.001,
+                temperature=283.15,
                 refractive_index=None):
     """
     This methods tests whether there is an existing mie table within the given directory

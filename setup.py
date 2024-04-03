@@ -44,7 +44,8 @@ F2PY_MODULE_NAME = 'core'
 F2PY_SRC_PATH = 'src'
 F2PY_SIGN_FILE = '{path}/core.pyf'.format(path=F2PY_SRC_PATH)
 
-F2PY_SHDOM_FILES = ['fftpack.f', 'ocean_brdf.f', 'shdom_nompi.f', 'shdomsub5.f', 'surface.f', 'util.f90','particle_flow.f90']
+F2PY_SHDOM_FILES = ['fftpack.f', 'ocean_brdf.f', 'shdom_nompi.f', 'shdomsub5.f', 'surface.f', 'util.f90','particle_flow.f90',
+                    'microwave_gases.f90','ckdfu.f','fukdata.f']
 
 if POLARIZED_SHDOM:
     F2PY_SHDOM_FILES.extend(['polarized/shdom90.f90',
@@ -155,6 +156,11 @@ F2PY_CORE_API = [
     'surface_parm_interp',
     'do_to_sh',
     'do_to_sh_unpol',
+    'make_sh_do_coef',
+    'ross_li_thick_sparse',
+    'calc_mw_gas_absorption',
+    'integrate_thermal_source',
+    'ckdfu',
     #'particle_flow',
     #'particle_flow_empirical'
 ]
